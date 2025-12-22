@@ -94,17 +94,51 @@ proj <- filterDoublets(ArchRProj = proj)
 ```
 
 ### Dimensionality Reduction and Clustering
-Unable to identify clusters. Cells were separated by time on UMAP.
+Cells were mainly separated by time. An alternative clustering strategy was desired. 
 ```{r}
 proj <- addIterativeLSI(ArchRProj = proj, useMatrix = "TileMatrix", name = "IterativeLSI")
-proj <- addUMAP(ArchRProj = proj, reducedDims = "IterativeLSI")
+proj <- addClusters(input = proj, reducedDims = "IterativeLSI")
+proj <- addUMAP(ArchRProj = proj, reducedDims = "IterativeLSI",force = T)
+plotEmbedding(ArchRProj = proj, colorBy = "cellColData",
+              name = "Clusters", embedding = "UMAP",size=4,baseSize=10)
 plotEmbedding(ArchRProj = proj, colorBy = "cellColData",
               name = "time", embedding = "UMAP",size=4,baseSize=10)
 ```
 
+### Add GeneScores
+```{r}
+proj <- addImputeWeights(proj)
+
+# Plot GeneSCores on UMAP
+plotEmbedding(
+    ArchRProj = proj, 
+    colorBy = "GeneScoreMatrix", 
+    name = "GATA6", 
+    embedding = "UMAP",
+    bins = 60,
+    imputeWeights = getImputeWeights(proj)
+)  + scale_fill_gradient(low = "white", high = "darkblue")
+```
+
+### Call peaks, and Add peak matrix and background peaks
+```{r}
+proj <- addGroupCoverages(ArchRProj = proj, groupBy = "time",force = TRUE)
+
+pathToMacs2 <- findMacs2()
+
+proj <- addReproduciblePeakSet(
+    ArchRProj = proj, 
+    groupBy = "time", 
+    pathToMacs2 = pathToMacs2,
+    force = TRUE
+    )
+proj <- addPeakMatrix(proj,force = TRUE)
+proj <- addBgdPeaks(proj,force = TRUE)
+```
+
 ### Save ArchR project
 ```{r}
-proj <- saveRDS(proj, here::here("output","scATAC_proj.rds"))
+proj <- saveArchRProject(ArchRProj = proj)
 ```
 
 
