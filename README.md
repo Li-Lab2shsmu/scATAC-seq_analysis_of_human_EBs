@@ -16,7 +16,7 @@ In this study, we have introduced "consistency score" to assist cell clustering,
 
 
 ## About
-If you have any questions, please feel free to contact the following author responsible for this Github repository, Dr. Yang Dong (yang.dongau@gmail.com).
+If you have any questions, please feel free to contact Dr. Yang Dong (yang.dongau@gmail.com).
 
 ## References
 1. Zhang, F. et al. InferLoop: leveraging single-cell chromatin accessibility for the signal of chromatin loop. Briefings in Bioinformatics 24(3), bbad166 (2023) 
