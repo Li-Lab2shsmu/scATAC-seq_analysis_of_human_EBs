@@ -1,0 +1,152 @@
+---
+title: '4. Use consistency score in zebrafish multi-omics data (construct ArchRProject)'
+author: "Yang"
+date: "2025-12-22"
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+### Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+### Load packages
+```{r}
+library(ArchR)
+addArchRThreads(threads = 8)
+library(BSgenome.Drerio.UCSC.danRer11)
+genomeAnnotation=createGenomeAnnotation(genome=BSgenome.Drerio.UCSC.danRer11 )
+library(TxDb.Drerio.UCSC.danRer11.refGene)
+library(org.Dr.eg.db)
+library(readr)
+library(tibble)
+# Create zebrafish annotation
+geneAnnotation=createGeneAnnotation(TxDb=TxDb.Drerio.UCSC.danRer11.refGene, OrgDb = org.Dr.eg.db)
+genomeAnnotation$chromSizes=resize(genomeAnnotation$chromSizes, width=c(width(genomeAnnotation$chromSizes)+5))
+```
+
+### Load scATAC data
+```{r}
+inputFiles <- here::here("data","outs","atac_fragments.tsv.gz")
+names(inputFiles)='zebrafish_scATAC-seq'
+```
+
+### Create Arrow files
+```{r}
+ArrowFiles <- createArrowFiles(
+  inputFiles = inputFiles,
+  sampleNames = names(inputFiles),
+  minTSS = 4, #Dont set this too high because you can always increase later
+  geneAnnotation = geneAnnotation, 
+  genomeAnnotation = genomeAnnotation,
+  minFragSize = 10,
+  maxFragSize = 2000,
+  addTileMat = TRUE,
+  addGeneScoreMat = TRUE
+)
+```
+
+### Inferring Doublets
+```{r}
+doubScores <- addDoubletScores(
+  input = ArrowFiles,
+  k = 10, #Refers to how many cells near a "pseudo-doublet" to count.
+  knnMethod = "UMAP", #Refers to the embedding to use for nearest neighbor search.
+  LSIMethod = 1
+)
+```
+
+### Create an ArchR project
+```{r}
+proj <- ArchRProject(
+  ArrowFiles = ArrowFiles, 
+  outputDirectory = "output",
+  copyArrows = TRUE, #This is recommened so that you maintain an unaltered copy for later usage.
+  geneAnnotation = geneAnnotation,
+  genomeAnnotation = genomeAnnotation
+)
+```
+
+### Check the number of reads in TSS 
+Only cells with log10Reads in TSS between 2 and 4 were retained. 
+```{r}
+Log10ReadsInTSS=log(proj@cellColData$ReadsInTSS,10)
+plot(density(Log10ReadsInTSS))
+proj <- subsetArchRProject(proj,cells= getCellNames(proj)[which(Log10ReadsInTSS>2 & Log10ReadsInTSS <4)],force=TRUE)
+```
+
+### Remove the cells not in scRNA-seq data, and add in scRNA-seq cell type information
+4922 cells were used for the downstream analysis.
+```{r}
+meta <- read.csv(here::here("data","metadata.csv"))
+meta$rowname <- paste0("zebrafish_scATAC-seq#", meta$rowname) 
+# Select common cells in both datasets
+common_cells <- intersect(rownames(proj@cellColData), meta$rowname)
+proj <- subsetArchRProject(proj,cells= common_cells,force=TRUE)
+
+meta_reorder <- meta %>%
+  column_to_rownames("rowname") %>%
+  .[rownames(proj@cellColData),] 
+
+proj@cellColData$CELL_TYPES=meta_reorder$cell_types
+```
+
+### Remove doublets
+177 cells were filtered. 4219 cells were retaind. 
+```{r}
+proj <- filterDoublets(ArchRProj = proj)
+```
+
+### Dimensionality Reduction and Clustering
+```{r}
+proj <- addIterativeLSI(ArchRProj = proj, useMatrix = "TileMatrix", name = "IterativeLSI")
+proj <- addClusters(input = proj, reducedDims = "IterativeLSI", resolution = 0.3, force = T)
+proj <- addUMAP(ArchRProj = proj, reducedDims = "IterativeLSI",force = T)
+plotEmbedding(ArchRProj = proj, colorBy = "cellColData",
+              name = "Clusters", embedding = "UMAP",size=4,baseSize=10)
+plotEmbedding(ArchRProj = proj, colorBy = "cellColData",
+              name = "CELL_TYPES", embedding = "UMAP",size=4,baseSize=10)
+```
+
+### Add GeneScores
+```{r}
+proj <- addImputeWeights(proj)
+
+# Plot GeneSCores on UMAP
+plotEmbedding(
+    ArchRProj = proj, 
+    colorBy = "GeneScoreMatrix", 
+    name = "sox17", 
+    embedding = "UMAP",
+    imputeWeights = getImputeWeights(proj)
+)  + scale_fill_gradient(low = "white", high = "darkblue")
+```
+
+### Call peaks, and Add peak matrix and background peaks
+```{r}
+proj <- addGroupCoverages(ArchRProj = proj, groupBy = "CELL_TYPES",force = TRUE)
+
+pathToMacs2 <- findMacs2()
+
+proj <- addReproduciblePeakSet(
+    ArchRProj = proj, 
+    groupBy = "CELL_TYPES", 
+    pathToMacs2 = pathToMacs2,
+    force = TRUE,
+    genomeSize = 1345118429
+    )
+proj <- addPeakMatrix(proj,force = TRUE)
+proj <- addBgdPeaks(proj,force = TRUE)
+```
+
+### Save ArchR project
+```{r}
+proj <- saveArchRProject(ArchRProj = proj)
+```
+
