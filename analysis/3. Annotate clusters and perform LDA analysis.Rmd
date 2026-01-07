@@ -1,0 +1,244 @@
+---
+title: "3. Annotate clusters and perform LDA analysis"
+author: "Yang"
+date: "2025-12-22"
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+### Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+### Load packages
+```{r}
+library(ArchR)
+library(BSgenome.Hsapiens.UCSC.hg19)
+library(chromVARmotifs)
+library(ComplexHeatmap)
+library(circlize)
+library(MASS)
+addArchRThreads(threads = 8)
+addArchRGenome("hg19")
+```
+
+### Load data
+The clustering information was achieved from our previous analysis (slightly different between two analyses). 
+```{r}
+proj <- loadArchRProject(path = here::here("ArchRSubset"))
+consistency_score <- readRDS(here::here("output","ZZZ.rds"))
+k_clusters <- readRDS(here::here("output","TMP.CLST.rds"))
+```
+
+### Subset the consistency scores of marker TFs
+```{r}
+consistency_score_zscore=t(apply(consistency_score,1,scale,center=F))
+colnames(consistency_score_zscore)=colnames(consistency_score)
+
+MARKER=c('NANOG','POU5F1',
+         'GATA6','SOX17','FOXA2',
+         'TBXT','MESP1','EOMES','MIXL1',
+         'PAX6','NEUROD1','GRHL2','TFAP2A')
+
+MARKER.TAG=c(rep('ESC',2),rep('END',3),rep('MES',4),rep('ECT',4))
+
+
+consistency_score_markers <- consistency_score_zscore[MARKER,]
+```
+
+### Heapmat showing the expression of marker genes in each cluster
+Figure 2C in mauscript
+```{r}
+ha = HeatmapAnnotation(time = proj@cellColData$time,
+    col = list(time = c("D4" = "grey40","D8" = "white")),
+     simple_anno_size = unit(0.7, "cm"), gap = unit(1, "mm"))
+
+
+ht=.drawHeatmap2(consistency_score_markers, column_split=k_clusters,row_split=MARKER.TAG,
+                show_column_names=F, show_row_names= T,
+                show_column_dend = F, show_row_dend =T,
+                cluster_columns=F, cluster_rows=T,
+                bottom_annotation = ha)
+
+ht.z=.drawHeatmap3(consistency_score_markers, column_split=k_clusters,row_split=MARKER.TAG,
+                show_column_names=F, show_row_names= T,
+                show_column_dend = F, show_row_dend =T,
+                cluster_columns=F, cluster_rows=T,
+                bottom_annotation = ha)
+
+ht.mean.gene=.splitMean(ht.z, rownames(consistency_score_markers), k_clusters)
+print(ht.mean.gene)
+```
+
+### Label each cluster
+```{r}
+ESC.ID=which(k_clusters==2)
+END.ID=which(k_clusters==6)
+MES.ID=which(k_clusters==7)
+ECT.ID=which(k_clusters==1)
+ESC_END.ID=which(k_clusters==4)
+ESC_MES.ID=which(k_clusters==5)
+ESC_ECT.ID=which(k_clusters==3)
+
+CLST=rep('NA',length(k_clusters))
+CLST[ESC.ID]='1.ES.2'
+CLST[END.ID]='2.EN.6'
+CLST[MES.ID]='3.ME.7'
+CLST[ECT.ID]='4.EC.1'
+CLST[ESC_END.ID]='5.toEN.4'
+CLST[ESC_MES.ID]='6.toME.5'
+CLST[ESC_ECT.ID]='7.toEC.3'
+```
+
+### Add cluster information to ArchRProject
+```{r}
+proj@cellColData$cluster= k_clusters %>% as.character()
+proj@cellColData$cluster_name = CLST %>% as.character()
+plotEmbedding(ArchRProj = proj, colorBy = "cellColData",
+              name = "cluster_name", embedding = "UMAP",size=3,baseSize=10)
+```
+
+### Linear Discriminant Analysis (LDA) 
+Figure 3A
+```{r}
+ORI <- consistency_score_markers
+ORI.CLST= k_clusters
+fit= MASS::lda(t(ORI),ORI.CLST)
+LDA=t(ORI) %*% fit$scaling
+
+VEC=LDA[,c(1,2)] %>% as.data.frame() 
+
+cluster <- CLST %>% as.data.frame()
+VEC$cluster <- cluster$. %>% as.character()
+ggplot(VEC,aes(x=LD1,y=LD2,col=cluster)) +
+  geom_point() +
+  theme_bw() +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank()) 
+```
+
+### Construct Seurat object to visualize consistency scores on UMAP and LDA plot
+```{r}
+seurat_object <- CreateSeuratObject(consistency_score, project = "SeuratProject")
+umap_df <- as(proj@embeddings$UMAP$df,"matrix")
+rownames(umap_df) <- colnames(seurat_object)
+colnames(umap_df) <- c("UMAP_1","UMAP_2")
+umap_df <- -umap_df
+seurat_object[['UMAP']] <- CreateDimReducObject(embeddings = umap_df, key = "UMAP_", global = T, assay = "RNA")
+
+VEC_df <- as(VEC[,c("LD1","LD2")],"matrix")
+seurat_object[['LDA']] <- CreateDimReducObject(embeddings = VEC_df, key = "LD_", global = T, assay = "RNA")
+
+# Add cell type labels to seurat object
+proj@cellColData$cluster= k_clusters %>% as.character()
+proj@cellColData$cluster_name = CLST %>% as.character()
+
+seurat_object@meta.data$cluster_name <- proj@cellColData$cluster_name
+
+Idents(seurat_object) <- "cluster_name"
+# UMAP plot
+DimPlot(seurat_object,reduction = "UMAP", label = F,cols = c("black", "red", "#83CF00","#03045e","#90e0ef","purple","orange")) + NoLegend() # LDA plot
+DimPlot(seurat_object,reduction = "LDA", label = F, cols = c("black", "red", "#83CF00","#03045e","#90e0ef","purple","orange")) + NoLegend() 
+# Visualizating consistency scores on UMAP and LDA plot
+FeaturePlot(seurat_object, features = "NEUROD1", reduction = "UMAP",cols = c("#eeeeee", "black"))
+FeaturePlot(seurat_object, features = "NEUROD1", reduction = "LDA", cols = c("#eeeeee", "black"))
+
+# "#a70000","#5A189A","darkorange"
+```
+
+### Functions used to construct heatmap
+```{r}
+.drawHeatmap2<-function(o.mat, ...){
+    library('ComplexHeatmap')
+    library('circlize')
+    o.mat=o.mat
+    #library('dbscan')
+    ###################
+    vvv=as.numeric(o.mat)
+    col_fun =colorRamp2(
+            c(-1,-0.5,0,0.5,1),
+               c('royalblue3','skyblue1',
+              'white','indianred1','red3'))
+    ################
+    ht=Heatmap(o.mat,row_title='',name="v",
+        #cluster_rows=T, cluster_columns=T,
+        #show_column_dend = T, show_row_dend = T,
+        #show_column_names= T, show_row_names= F,
+        #row_split=R.SPLIT,
+        #column_split=C.SPLIT,
+        col=col_fun, border = TRUE,
+        row_names_side='right',
+        row_names_gp = gpar(fontsize = 10, lineheight=NULL),
+        column_names_gp = gpar(fontsize = 10, lineheight=NULL),
+        row_names_max_width = max_text_width(rownames(o.mat),gp = gpar(fontsize = 15)),
+        column_names_max_height = max_text_width(colnames(o.mat),gp = gpar(fontsize = 15)),
+        ...)
+    pdf('tmp_initialize.pdf',width=7,height=7)
+    ht=draw(ht)
+    dev.off()
+    return(ht)
+}
+
+.drawHeatmap3<-function(o.mat, ...){
+    library('ComplexHeatmap')
+    library('circlize')
+    o.mat=o.mat
+    #library('dbscan')
+    ###################
+    vvv=as.numeric(o.mat)
+    col_fun =colorRamp2(
+            c(qnorm(0.5),qnorm(0.6),qnorm(0.7),qnorm(0.8),qnorm(0.9)),
+               c('royalblue3','skyblue1',
+              'white','indianred1','red3'))
+    ################
+    ht=Heatmap(o.mat,row_title='',name="v",
+        #cluster_rows=T, cluster_columns=T,
+        #show_column_dend = T, show_row_dend = T,
+        #show_column_names= T, show_row_names= F,
+        #row_split=R.SPLIT,
+        #column_split=C.SPLIT,
+        col=col_fun, border = TRUE,
+        row_names_side='right',
+        row_names_gp = gpar(fontsize = 10, lineheight=NULL),
+        column_names_gp = gpar(fontsize = 10, lineheight=NULL),
+        row_names_max_width = max_text_width(rownames(o.mat),gp = gpar(fontsize = 15)),
+        column_names_max_height = max_text_width(colnames(o.mat),gp = gpar(fontsize = 15)),
+        ...)
+    pdf('tmp_initialize.pdf',width=7,height=7)
+    ht=draw(ht)
+    dev.off()
+    return(ht)
+}
+
+.splitMean <-function(ht, R.SPLIT, C.SPLIT){
+    UR.SPLIT=sort(unique(R.SPLIT))
+    UC.SPLIT=sort(unique(C.SPLIT))
+    ht_mat=ht@ht_list$v@matrix
+    i=1
+    while(i<=length(UR.SPLIT)){
+        j=1
+        while(j<=length(UC.SPLIT)){
+            this_r=UR.SPLIT[i]
+            this_c=UC.SPLIT[j]
+            this_r_index=which(R.SPLIT==this_r)
+            this_c_index=which(C.SPLIT==this_c)
+            this_r_name=rownames(ht_mat)[this_r_index]
+            this_c_name=colnames(ht_mat)[this_c_index]
+            this_mean=mean(as.numeric(ht_mat[this_r_index,this_c_index]))
+            ht_mat[this_r_name,this_c_name]=this_mean
+        j=j+1}
+    i=i+1}
+    ht@ht_list$v@matrix=ht_mat
+    return(ht)
+}
+```
+

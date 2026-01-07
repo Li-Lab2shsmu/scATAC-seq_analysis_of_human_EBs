@@ -1,0 +1,138 @@
+---
+title: "2. Use consistency score to identify clusters in scATAC-seq data"
+author: "Yang"
+date: "2025-12-17"
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+### Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+### Load packages
+```{r}
+library(ArchR)
+library(BSgenome.Hsapiens.UCSC.hg19)
+library(chromVARmotifs)
+source('https://raw.githubusercontent.com/jumphone/InferLoop/main/inferloop/InferLoop.R')
+source('https://gitee.com/jumphone/BEER/raw/master/BEER.R')
+addArchRThreads(threads = 8)
+addArchRGenome("hg19")
+```
+
+### Load ArchR project
+```{r}
+proj <- loadArchRProject(path = here::here("ArchRSubset"))
+```
+
+### Get Gene scores
+```{r}
+GeneScore = getMatrixFromProject(proj,useMatrix ='GeneScoreMatrix')
+GeneScore_matrix = GeneScore@assays@data$GeneScoreMatrix %>% as.matrix()
+rownames(GeneScore_matrix)= GeneScore@elementMetadata$name
+```
+
+### Add CISBP motif annotation to ArchRproject (from chromVARmotifs package)
+```{r}
+proj <- addMotifAnnotations(ArchRProj = proj, motifSet = "cisbp", name = "Motif",force = TRUE, collection = "CORE")
+proj <- addDeviationsMatrix(
+      ArchRProj = proj,
+      peakAnnotation = "Motif",
+      force = TRUE
+      )
+```
+
+### Get CISBP motif enrichment scores
+870 motifs identified
+```{r}
+Motif_CISBP = getMatrixFromProject(proj, useMatrix ='MotifMatrix')
+Motif_CISBP_matrix = Motif_CISBP@assays@data$z
+Motif_CISBP_matrix_TF = inferloop.splitLoop(rownames(Motif_CISBP_matrix),'_',2)[,1]
+```
+
+### Add jasper annotation to ArchRProject
+```{r}
+proj <- addMotifAnnotations(ArchRProj = proj, motifSet = "JASPAR2020", annoName = "Motif",force = TRUE, species = 'Homo sapiens',collection = "CORE")
+proj <- addDeviationsMatrix(
+      ArchRProj = proj, 
+      peakAnnotation = "Motif",
+      force = TRUE
+      )
+```
+
+### Get JASPAR motif enrichment scores
+633 motifs identified
+```{r}
+Motif_jaspar = getMatrixFromProject(proj, useMatrix ='MotifMatrix')
+Motif_jaspar_matrix = Motif_jaspar@assays@data$z
+Motif_jaspar_matrix_TF=inferloop.splitLoop(rownames(Motif_jaspar_matrix),'_',2)[,1]
+```
+
+### Add JASPAR-specific motifs into CISBP motif matrix
+```{r}
+jaspar_specific <- which(!Motif_jaspar_matrix_TF %in% Motif_CISBP_matrix_TF)
+# 123 JASPAR specific motifs
+Motif_jaspar_matrix_specific=Motif_jaspar_matrix[jaspar_specific,]
+Motif_jaspar_specific_TF=Motif_jaspar_matrix_TF[jaspar_specific]
+
+# 993 total motifs
+Motif_matrix_all<- rbind(Motif_CISBP_matrix, Motif_jaspar_matrix_specific)
+Motif_matrix_all_TF <- c(Motif_CISBP_matrix_TF,Motif_jaspar_specific_TF)
+rownames(Motif_matrix_all) <- Motif_matrix_all_TF
+```
+
+### Construct consistency score
+```{r}
+# Combine GeneScore and motif enrichment score, using common genes for the consistency score
+COM=.simple_combine(GeneScore_matrix,Motif_matrix_all)
+D1=COM$exp_sc_mat1
+D2=COM$exp_sc_mat2
+
+consistency_score=D1
+i=1
+while(i<=nrow(consistency_score)){
+    this_x=D1[i,]
+    this_y=D2[i,]
+    this_z=inferloop.calILS(this_x,this_y,only_pos=TRUE)
+    consistency_score[i,]=this_z
+    i=i+1}
+
+
+consistency_score_zscore=t(apply(consistency_score,1,scale,center=F))
+colnames(consistency_score_zscore)=colnames(consistency_score)
+```
+
+### Use cell-type specific markers to force clustering using k-means
+```{r}
+MARKER=c('NANOG','POU5F1',
+         'GATA6','SOX17','FOXA2',
+         'TBXT','MESP1','EOMES','MIXL1',
+         'PAX6','NEUROD1','GRHL2','TFAP2A')
+
+MARKER.TAG=c(rep('ESC',2),rep('END',3),rep('MES',4),rep('ECT',4))
+
+
+consistency_score_markers=consistency_score_zscore[MARKER,]
+markers_mean=.generate_mean(t(consistency_score_markers),MARKER.TAG)
+COR=cor(t(markers_mean))
+COR[which(is.na(COR))]=0
+# Force clustering into 7 groups
+set.seed(1)
+k_clusters=cutree(hclust(dist(COR)),k=7) 
+```
+
+As the entire analyses performed by different people and run in different R environment, the TF motif enrichment is a bit different from the previous results, leading to different consistency scores and clustering results. Therefore, in order to keep the results consistent, we loaded the clustering information from our previous analysis for the downstream analyses.
+
+### Save data
+```{r}
+# saveRDS(k_clusters, here::here("output","TMP.CLST.rds"))
+saveRDS(Motif_matrix_all,here::here("output","Motif_matrix_all.rds"))
+saveRDS(consistency_score, here::here("output","consistency_score.rds"))
+```
