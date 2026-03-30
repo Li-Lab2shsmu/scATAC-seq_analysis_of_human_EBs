@@ -1,7 +1,7 @@
 # Single-cell ATAC-seq analysis of human embryoid bodies reveals crucial transcription factor networks involved in early germ layer specification
 
 ### Linying Li<sup>†</sup>, Xiaoyu He<sup>†</sup>, Feng Zhang<sup>†</sup>,   ..., Yang Dong*, Junmei Zhou*, Lingjie Li*
-
+[![DOI](https://img.shields.io/badge/DOI-10.1186/s13059--025--03917--8-blue)](https://link.springer.com/article/10.1186/s13578-026-01561-8) 
 <p align="justify">In this study, we employed human embryoid body as an in vitro model to mimic early development and conducted single-cell ATAC sequencing to delineate lineage-specific chromatin regulatory elements and their associated transcription factor (TF) networks. </p>
 
 <p align="center">
@@ -30,4 +30,6 @@ If you have any questions, please feel free to contact Dr. Yang Dong (yang.donga
 
 
 ## Citation
+<p align="justify">This work has been published on <em>Cell & Bioscience</em> and can be cited as follows.</p>
 
+Li, L. et al. Single-cell ATAC-seq analysis of human embryoid bodies reveals crucial transcription factor networks involved in early germ layer specification. _Cell Biosci_ (2026). https://doi.org/10.1186/s13578-026-01561-8
