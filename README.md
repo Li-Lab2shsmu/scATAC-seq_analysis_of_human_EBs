@@ -32,4 +32,4 @@ If you have any questions, please feel free to contact Dr. Yang Dong (yang.donga
 ## Citation
 <p align="justify">This work has been published on <em>Cell & Bioscience</em> and can be cited as follows.</p>
 
-Li, L. et al. Single-cell ATAC-seq analysis of human embryoid bodies reveals crucial transcription factor networks involved in early germ layer specification. _Cell Biosci_ (2026). https://doi.org/10.1186/s13578-026-01561-8
+Li, L. et al. Single-cell ATAC-seq analysis of human embryoid bodies reveals crucial transcription factor networks involved in early germ layer specification. _Cell Biosci_ 16, 54 (2026). https://doi.org/10.1186/s13578-026-01561-8
